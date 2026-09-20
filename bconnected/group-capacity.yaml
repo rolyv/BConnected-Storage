@@ -1,0 +1,4 @@
+# Merge this fragment into a complete storage-service configuration.
+# It is not a standalone deployment configuration.
+group:
+  maxGroupSize: 10000

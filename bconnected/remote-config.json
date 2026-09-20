@@ -1,0 +1,4 @@
+{
+  "global.groupsv2.maxGroupSize": 10000,
+  "global.groupsv2.groupSizeHardLimit": 10000
+}
