@@ -362,6 +362,9 @@ public class GroupsController {
   @Produces(ProtocolBufferMediaType.APPLICATION_PROTOBUF)
   @Path("/avatar/form")
   public CompletableFuture<Response> getAvatarUploadForm(@Auth GroupUser user) {
+    if (policySigner == null || policyGenerator == null) {
+      throw new jakarta.ws.rs.ServiceUnavailableException("Group avatar uploads are unavailable in this deployment");
+    }
 
     return groupsManager.getGroup(user.getGroupId()).thenApply(group -> {
 
@@ -490,15 +493,8 @@ public class GroupsController {
 
     groupValidator.validateFinalGroupState(validatedGroup);
 
-    return groupsManager.createGroup(user.getGroupId(), validatedGroup)
-        .thenCompose(
-            created -> {
-              if (!created) {
-                return CompletableFuture.completedFuture(false);
-              } else {
-                return groupsManager.appendChangeRecord(user.getGroupId(), 0, initialGroupChange, validatedGroup);
-              }
-            }).thenApply(
+    return groupsManager.createWithChange(user.getGroupId(), validatedGroup, initialGroupChange)
+        .thenApply(
                 result -> {
                   if (result) {
                     GroupResponse.Builder responseBuilder = GroupResponse.newBuilder().setGroup(validatedGroup);
@@ -665,10 +661,10 @@ public class GroupsController {
 
       groupValidator.validateFinalGroupState(updatedGroupState);
 
-      return groupsManager.updateGroup(user.getGroupId(), updatedGroupState)
-          .thenCompose(result -> {
+      return groupsManager.updateWithChange(user.getGroupId(), updatedGroupState, signedGroupChange)
+          .thenApply(result -> {
                 if (result.isPresent()) {
-                  return CompletableFuture.completedFuture(Response.status(Response.Status.CONFLICT).build());
+                  return Response.status(Response.Status.CONFLICT).build();
                 }
 
                 final GroupChangeResponse.Builder responseBuilder =
@@ -678,9 +674,7 @@ public class GroupsController {
                   responseBuilder.setGroupSendEndorsementsResponse(getSerializedGroupSendEndorsements(updatedGroupState));
                 }
                 final GroupChangeResponse response = responseBuilder.build();
-                return groupsManager.appendChangeRecord(
-                    user.getGroupId(), version, signedGroupChange, updatedGroupState)
-                    .thenApply(success -> Response.ok(response).build());
+                return Response.ok(response).build();
               });
         }).whenComplete(
             (result, throwable) -> {

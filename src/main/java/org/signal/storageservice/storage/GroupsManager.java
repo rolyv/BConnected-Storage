@@ -17,24 +17,26 @@ import javax.annotation.Nullable;
 
 public class GroupsManager {
 
-  private final GroupsTable   groupsTable;
-  private final GroupLogTable groupLogTable;
+  private final GroupsStore store;
 
   public GroupsManager(BigtableDataClient client, String groupsTableId, String groupLogsTableId) {
-    this.groupsTable   = new GroupsTable  (client, groupsTableId   );
-    this.groupLogTable = new GroupLogTable(client, groupLogsTableId);
+    this(new BigtableGroupsStore(client, groupsTableId, groupLogsTableId));
+  }
+
+  public GroupsManager(GroupsStore store) {
+    this.store = java.util.Objects.requireNonNull(store);
   }
 
   public CompletableFuture<Optional<Group>> getGroup(ByteString groupId) {
-    return groupsTable.getGroup(groupId);
+    return store.getGroup(groupId);
   }
 
   public CompletableFuture<Boolean> createGroup(ByteString groupId, Group group) {
-    return groupsTable.createGroup(groupId, group);
+    return store.createGroup(groupId, group);
   }
 
   public CompletableFuture<Optional<Group>> updateGroup(ByteString groupId, Group group) {
-    return groupsTable.updateGroup(groupId, group)
+    return store.updateGroup(groupId, group)
                       .thenCompose(modified -> {
                         if (modified) return CompletableFuture.completedFuture(Optional.empty());
                         else          return getGroup(groupId).thenApply(result -> Optional.of(result.orElseThrow()));
@@ -48,7 +50,7 @@ public class GroupsManager {
       throw new IllegalArgumentException("Version to read from (" + fromVersionInclusive + ") must be less than version to read to (" + toVersionExclusive + ")");
     }
 
-    return groupLogTable.getRecordsFromVersion(groupId, maxSupportedChangeEpoch, includeFirstState, includeLastState, fromVersionInclusive, toVersionExclusive, group.getVersion())
+    return store.getRecordsFromVersion(groupId, maxSupportedChangeEpoch, includeFirstState, includeLastState, fromVersionInclusive, toVersionExclusive, group.getVersion())
                         .thenApply(groupChangeStatesAndSeenCurrentVersion -> {
                           List<GroupChangeState> groupChangeStates = groupChangeStatesAndSeenCurrentVersion.first();
                           boolean seenCurrentVersion = groupChangeStatesAndSeenCurrentVersion.second();
@@ -60,7 +62,15 @@ public class GroupsManager {
   }
 
   public CompletableFuture<Boolean> appendChangeRecord(ByteString groupId, int version, GroupChange change, Group state) {
-    return groupLogTable.append(groupId, version, change, state);
+    return store.append(groupId, version, change, state);
+  }
+
+  public CompletableFuture<Boolean> createWithChange(ByteString id, Group group, GroupChange change) {
+    return store.createWithChange(id, group, change);
+  }
+
+  public CompletableFuture<Optional<Group>> updateWithChange(ByteString id, Group group, GroupChange change) {
+    return store.updateWithChange(id, group, change);
   }
 
   private static boolean isGroupInRange(Group group, int fromVersionInclusive, int toVersionExclusive) {

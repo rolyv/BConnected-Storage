@@ -129,6 +129,26 @@ abstract class BaseGroupsControllerTest {
   @BeforeEach
   void resetGroupsManager() {
     reset(groupsManager);
+
+    // Preserve the existing controller fixtures' explicit state/log expectations. Native atomicity is
+    // exercised against PostgreSQL in PostgresStorageTest, independently of these cryptographic API regressions.
+    when(groupsManager.createWithChange(any(), any(), any())).thenAnswer(invocation -> {
+      ByteString id = invocation.getArgument(0);
+      Group state = invocation.getArgument(1);
+      GroupChange change = invocation.getArgument(2);
+      return groupsManager.createGroup(id, state).thenCompose(created -> created
+          ? groupsManager.appendChangeRecord(id, state.getVersion(), change, state)
+          : CompletableFuture.completedFuture(false));
+    });
+    when(groupsManager.updateWithChange(any(), any(), any())).thenAnswer(invocation -> {
+      ByteString id = invocation.getArgument(0);
+      Group state = invocation.getArgument(1);
+      GroupChange change = invocation.getArgument(2);
+      return groupsManager.updateGroup(id, state).thenCompose(conflict -> conflict.isPresent()
+          ? CompletableFuture.completedFuture(conflict)
+          : groupsManager.appendChangeRecord(id, state.getVersion(), change, state)
+              .thenApply(ignored -> Optional.empty()));
+    });
   }
 
   protected void setupGroupsManagerBehaviors(Group group) {

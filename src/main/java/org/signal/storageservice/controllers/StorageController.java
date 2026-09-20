@@ -112,11 +112,8 @@ public class StorageController {
       return CompletableFuture.failedFuture(new WebApplicationException(Status.REQUEST_ENTITY_TOO_LARGE));
     }
 
-    final CompletableFuture<Void> clearAllFuture = writeOperation.getClearAll()
-        ? storageManager.clearItems(user)
-        : CompletableFuture.completedFuture(null);
-
-    return clearAllFuture.thenCompose(ignored -> storageManager.set(user, writeOperation.getManifest(), writeOperation.getInsertItemList(), writeOperation.getDeleteKeyList()))
+    return storageManager.write(user, writeOperation.getManifest(), writeOperation.getInsertItemList(),
+        writeOperation.getDeleteKeyList(), writeOperation.getClearAll())
       .thenApply(
         manifest -> {
           if (manifest.isPresent())

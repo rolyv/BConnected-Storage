@@ -193,7 +193,7 @@ class StorageControllerTest {
 
   @Test
   void testWrite() {
-    when(storageManager.set(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList())).thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+    when(storageManager.write(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList(), eq(false))).thenReturn(CompletableFuture.completedFuture(Optional.empty()));
 
     StorageManifest manifest = StorageManifest.newBuilder()
                                               .setVersion(1337)
@@ -236,7 +236,7 @@ class StorageControllerTest {
     ArgumentCaptor<List<StorageItem>> insertCaptor = ArgumentCaptor.forClass(List.class);
     ArgumentCaptor<List<ByteString>>  deleteCaptor = ArgumentCaptor.forClass(List.class);
 
-    verify(storageManager, times(1)).set(eq(new User(AuthHelper.VALID_USER.getRawUUID())), eq(manifest), insertCaptor.capture(), deleteCaptor.capture());
+    verify(storageManager, times(1)).write(eq(new User(AuthHelper.VALID_USER.getRawUUID())), eq(manifest), insertCaptor.capture(), deleteCaptor.capture(), eq(false));
     verifyNoMoreInteractions(storageManager);
 
     assertThat(insertCaptor.getValue().size()).isEqualTo(2);
@@ -250,8 +250,26 @@ class StorageControllerTest {
   }
 
   @Test
+  void testClearAllIsPartOfTheAtomicWrite() {
+    final User user = new User(AuthHelper.VALID_USER.getRawUUID());
+    final StorageManifest manifest = StorageManifest.newBuilder().setVersion(1)
+        .setValue(ByteString.copyFromUtf8("replacement manifest")).build();
+    when(storageManager.write(eq(user), eq(manifest), anyList(), anyList(), eq(true)))
+        .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+    final WriteOperation operation = WriteOperation.newBuilder().setManifest(manifest).setClearAll(true).build();
+
+    Response response = resources.getJerseyTest().target("/v1/storage/").request()
+        .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_USER, AuthHelper.VALID_PASSWORD))
+        .put(Entity.entity(operation.toByteArray(), ProtocolBufferMediaType.APPLICATION_PROTOBUF));
+
+    assertThat(response.getStatus()).isEqualTo(200);
+    verify(storageManager).write(eq(user), eq(manifest), eq(List.of()), eq(List.of()), eq(true));
+    verifyNoMoreInteractions(storageManager);
+  }
+
+  @Test
   void testWriteUnauthorized() {
-    when(storageManager.set(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList())).thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+    when(storageManager.write(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList(), eq(false))).thenReturn(CompletableFuture.completedFuture(Optional.empty()));
 
     StorageManifest manifest = StorageManifest.newBuilder()
                                               .setVersion(1337)
@@ -300,7 +318,7 @@ class StorageControllerTest {
                                                      .setValue(ByteString.copyFromUtf8("Current manifest"))
                                                      .build();
 
-    when(storageManager.set(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList()))
+    when(storageManager.write(eq(new User(AuthHelper.VALID_USER.getRawUUID())), any(StorageManifest.class), anyList(), anyList(), eq(false)))
         .thenReturn(CompletableFuture.completedFuture(Optional.of(currentManifest)));
 
     StorageManifest stale = StorageManifest.newBuilder()
@@ -348,7 +366,7 @@ class StorageControllerTest {
 
     assertThat(manifest).isEqualTo(currentManifest);
 
-    verify(storageManager, times(1)).set(eq(new User(AuthHelper.VALID_USER.getRawUUID())), eq(stale), anyList(), anyList());
+    verify(storageManager, times(1)).write(eq(new User(AuthHelper.VALID_USER.getRawUUID())), eq(stale), anyList(), anyList(), eq(false));
     verifyNoMoreInteractions(storageManager);
   }
 

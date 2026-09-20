@@ -18,6 +18,9 @@ import org.signal.storageservice.configuration.ZkConfiguration;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.AssertTrue;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.signal.storageservice.configuration.PostgresConfiguration;
 import org.signal.storageservice.util.ua.ClientPlatform;
 import java.util.Collections;
 import java.util.Map;
@@ -27,8 +30,19 @@ public class StorageServiceConfiguration extends Configuration {
 
   @JsonProperty
   @Valid
-  @NotNull
   private BigTableConfiguration bigtable;
+
+  @JsonProperty
+  @Valid
+  private PostgresConfiguration postgres;
+
+  public PostgresConfiguration getPostgresConfiguration() { return postgres; }
+
+  @JsonIgnore
+  @AssertTrue(message = "Select exactly one of PostgreSQL or Bigtable; legacy Bigtable also requires CDN configuration")
+  public boolean isPersistenceConfigurationValid() {
+    return postgres != null ? bigtable == null && cdn == null : bigtable != null && cdn != null;
+  }
 
   @JsonProperty
   @Valid
@@ -42,7 +56,6 @@ public class StorageServiceConfiguration extends Configuration {
 
   @JsonProperty
   @Valid
-  @NotNull
   private CdnConfiguration cdn;
 
   @JsonProperty

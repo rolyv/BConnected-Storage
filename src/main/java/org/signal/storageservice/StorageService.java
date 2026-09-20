@@ -37,6 +37,8 @@ import org.signal.storageservice.controllers.GroupsController;
 import org.signal.storageservice.controllers.GroupsV1Controller;
 import org.signal.storageservice.controllers.HealthCheckController;
 import org.signal.storageservice.controllers.ReadinessController;
+import org.signal.storageservice.controllers.PostgresReadinessController;
+import org.signal.storageservice.storage.PostgresStorage;
 import org.signal.storageservice.controllers.StorageController;
 import org.signal.storageservice.filters.TimestampResponseFilter;
 import org.signal.storageservice.metrics.MetricsHttpEventHandler;
@@ -75,14 +77,36 @@ public class StorageService extends Application<StorageServiceConfiguration> {
 
     UncaughtExceptionHandler.register();
 
-    BigtableDataSettings bigtableDataSettings = BigtableDataSettings.newBuilder()
-                                                                    .setProjectId(config.getBigTableConfiguration().getProjectId())
-                                                                    .setInstanceId(config.getBigTableConfiguration().getInstanceId())
-                                                                    .build();
-    BigtableDataClient bigtableDataClient = BigtableDataClient.create(bigtableDataSettings);
-    ServerSecretParams serverSecretParams = new ServerSecretParams(config.getZkConfiguration().getServerSecret());
-    StorageManager     storageManager     = new StorageManager(bigtableDataClient, config.getBigTableConfiguration().getContactManifestsTableId(), config.getBigTableConfiguration().getContactsTableId());
-    GroupsManager      groupsManager      = new GroupsManager(bigtableDataClient, config.getBigTableConfiguration().getGroupsTableId(), config.getBigTableConfiguration().getGroupLogsTableId());
+    if (!config.isPersistenceConfigurationValid()) {
+      throw new IllegalArgumentException("Select PostgreSQL without Bigtable/CDN, or configure the legacy Bigtable/CDN backend");
+    }
+    final StorageManager storageManager;
+    final GroupsManager groupsManager;
+    final Object readiness;
+    if (config.getPostgresConfiguration() != null) {
+      final PostgresStorage postgres = config.getPostgresConfiguration().build(environment);
+      postgres.checkReady();
+      storageManager = new StorageManager(postgres);
+      groupsManager = new GroupsManager(postgres);
+      readiness = new PostgresReadinessController(postgres);
+    } else {
+      final BigtableDataSettings settings = BigtableDataSettings.newBuilder()
+          .setProjectId(config.getBigTableConfiguration().getProjectId())
+          .setInstanceId(config.getBigTableConfiguration().getInstanceId()).build();
+      final BigtableDataClient client = BigtableDataClient.create(settings);
+      environment.lifecycle().manage(new io.dropwizard.lifecycle.Managed() {
+        @Override public void stop() { client.close(); }
+      });
+      storageManager = new StorageManager(client, config.getBigTableConfiguration().getContactManifestsTableId(),
+          config.getBigTableConfiguration().getContactsTableId());
+      groupsManager = new GroupsManager(client, config.getBigTableConfiguration().getGroupsTableId(),
+          config.getBigTableConfiguration().getGroupLogsTableId());
+      readiness = new ReadinessController(client,
+          Set.of(config.getBigTableConfiguration().getGroupsTableId(), config.getBigTableConfiguration().getGroupLogsTableId(),
+              config.getBigTableConfiguration().getContactsTableId(), config.getBigTableConfiguration().getContactManifestsTableId()),
+          config.getWarmUpConfiguration().count());
+    }
+    final ServerSecretParams serverSecretParams = new ServerSecretParams(config.getZkConfiguration().getServerSecret());
 
     environment.getObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     environment.getObjectMapper().setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE);
@@ -102,8 +126,8 @@ public class StorageService extends Application<StorageServiceConfiguration> {
     AuthFilter<BasicCredentials, User>      userAuthFilter      = new BasicCredentialAuthFilter.Builder<User>().setAuthenticator(userAuthenticator).buildAuthFilter();
     AuthFilter<BasicCredentials, GroupUser> groupUserAuthFilter = new BasicCredentialAuthFilter.Builder<GroupUser>().setAuthenticator(groupUserAuthenticator).buildAuthFilter();
 
-    PolicySigner        policySigner        = new PolicySigner(config.getCdnConfiguration().getAccessSecret(), config.getCdnConfiguration().getRegion());
-    PostPolicyGenerator postPolicyGenerator = new PostPolicyGenerator(config.getCdnConfiguration().getRegion(), config.getCdnConfiguration().getBucket(), config.getCdnConfiguration().getAccessKey());
+    PolicySigner        policySigner        = config.getPostgresConfiguration() != null ? null : new PolicySigner(config.getCdnConfiguration().getAccessSecret(), config.getCdnConfiguration().getRegion());
+    PostPolicyGenerator postPolicyGenerator = config.getPostgresConfiguration() != null ? null : new PostPolicyGenerator(config.getCdnConfiguration().getRegion(), config.getCdnConfiguration().getBucket(), config.getCdnConfiguration().getAccessKey());
 
     environment.jersey().register(new PolymorphicAuthDynamicFeature<>(ImmutableMap.of(User.class, userAuthFilter, GroupUser.class, groupUserAuthFilter)));
     environment.jersey().register(new PolymorphicAuthValueFactoryProvider.Binder<>(ImmutableSet.of(User.class, GroupUser.class)));
@@ -111,12 +135,7 @@ public class StorageService extends Application<StorageServiceConfiguration> {
     environment.jersey().register(new TimestampResponseFilter(Clock.systemUTC()));
 
     environment.jersey().register(new HealthCheckController());
-    environment.jersey().register(new ReadinessController(bigtableDataClient,
-        Set.of(config.getBigTableConfiguration().getGroupsTableId(),
-            config.getBigTableConfiguration().getGroupLogsTableId(),
-            config.getBigTableConfiguration().getContactsTableId(),
-            config.getBigTableConfiguration().getContactManifestsTableId()),
-        config.getWarmUpConfiguration().count()));
+    environment.jersey().register(readiness);
     environment.jersey().register(new StorageController(storageManager));
     environment.jersey().register(new GroupsController(Clock.systemUTC(), groupsManager, serverSecretParams, policySigner, postPolicyGenerator, config.getGroupConfiguration(), externalGroupCredentialGenerator));
     environment.jersey().register(new GroupsV1Controller(Clock.systemUTC(), groupsManager, serverSecretParams, policySigner, postPolicyGenerator, config.getGroupConfiguration(), externalGroupCredentialGenerator));
