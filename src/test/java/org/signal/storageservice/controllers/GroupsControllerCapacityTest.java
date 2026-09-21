@@ -5,28 +5,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.google.protobuf.ByteString;
-import io.dropwizard.auth.basic.BasicCredentials;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -36,29 +28,15 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.postgresql.ds.PGSimpleDataSource;
-import org.signal.libsignal.protocol.ServiceId;
-import org.signal.libsignal.protocol.ServiceId.Aci;
-import org.signal.libsignal.protocol.ServiceId.Pni;
 import org.signal.libsignal.zkgroup.NotarySignature;
 import org.signal.libsignal.zkgroup.ServerSecretParams;
-import org.signal.libsignal.zkgroup.auth.ClientZkAuthOperations;
-import org.signal.libsignal.zkgroup.auth.ServerZkAuthOperations;
 import org.signal.libsignal.zkgroup.groups.ClientZkGroupCipher;
-import org.signal.libsignal.zkgroup.groups.GroupSecretParams;
-import org.signal.libsignal.zkgroup.groupsend.GroupSendDerivedKeyPair;
-import org.signal.libsignal.zkgroup.groupsend.GroupSendEndorsementsResponse;
-import org.signal.libsignal.zkgroup.profiles.ClientZkProfileOperations;
-import org.signal.libsignal.zkgroup.profiles.ProfileKey;
 import org.signal.libsignal.zkgroup.profiles.ServerZkProfileOperations;
 import org.signal.storageservice.auth.ExternalGroupCredentialGenerator;
-import org.signal.storageservice.auth.GroupUser;
-import org.signal.storageservice.auth.GroupUserAuthenticator;
 import org.signal.storageservice.configuration.GroupConfiguration;
 import org.signal.storageservice.groups.GroupValidator;
 import org.signal.storageservice.storage.GroupsManager;
 import org.signal.storageservice.storage.PostgresStorage;
-import org.signal.storageservice.storage.protos.groups.AccessControl;
 import org.signal.storageservice.storage.protos.groups.Group;
 import org.signal.storageservice.storage.protos.groups.GroupAttributeBlob;
 import org.signal.storageservice.storage.protos.groups.GroupChange;
@@ -79,63 +57,20 @@ class GroupsControllerCapacityTest {
   private static final GroupConfiguration CONFIG =
       new GroupConfiguration(CAP, 1024, 8192, new byte[32], null, null);
   private final List<Map<String, Object>> measurements = new ArrayList<>();
-  private PGSimpleDataSource operator;
-  private PGSimpleDataSource dataSource;
-  private String database;
-  private ExecutorService executor;
+  private DisposableGroupDatabase database;
   private PostgresStorage storage;
   private GroupsManager manager;
 
   @BeforeAll
   void createDisposableDatabase() throws Exception {
-    String configuredUrl = System.getenv("BCONNECTED_GROUP_TEST_JDBC_URL");
-    if (configuredUrl == null || !configuredUrl.startsWith("jdbc:postgresql://")) {
-      throw new IllegalArgumentException("Capacity tests require an explicit loopback test database");
-    }
-    URI uri = URI.create(configuredUrl.substring("jdbc:".length()));
-    if (!List.of("127.0.0.1", "localhost", "::1").contains(uri.getHost())
-        || !uri.getPath().matches("/[a-zA-Z0-9_]+_test")
-        || uri.getQuery() != null || uri.getUserInfo() != null || uri.getFragment() != null) {
-      throw new IllegalArgumentException("Only a plain loopback database ending in _test is permitted");
-    }
-    operator = localDataSource(uri, uri.getPath().substring(1));
-    database = "bconnected_capacity_" + UUID.randomUUID().toString().replace("-", "") + "_test";
-    try (var connection = operator.getConnection(); var statement = connection.createStatement()) {
-      statement.execute("CREATE DATABASE " + database);
-    }
-    dataSource = localDataSource(uri, database);
-    try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
-      statement.execute(Files.readString(Path.of("bconnected/migrations/001-postgres.sql")));
-    }
-    executor = Executors.newFixedThreadPool(2);
-    storage = new PostgresStorage(dataSource, executor);
-    manager = new GroupsManager(storage);
-  }
-
-  private PGSimpleDataSource localDataSource(URI uri, String name) {
-    var result = new PGSimpleDataSource();
-    result.setServerNames(new String[] {uri.getHost()});
-    result.setPortNumbers(new int[] {uri.getPort() < 0 ? 5432 : uri.getPort()});
-    result.setDatabaseName(name);
-    result.setUser("postgres");
-    result.setPassword(System.getenv("BCONNECTED_TEST_POSTGRES_PASSWORD"));
-    result.setConnectTimeout(5);
-    result.setSocketTimeout(30);
-    result.setOptions("-c statement_timeout=15000 -c lock_timeout=5000");
-    return result;
+    database = new DisposableGroupDatabase();
+    storage = database.storage;
+    manager = database.manager;
   }
 
   @AfterAll
   void closeAndWriteMeasurements() throws Exception {
-    try {
-      if (executor != null) executor.close();
-    } finally {
-      if (operator != null && database != null) {
-        try (var connection = operator.getConnection(); var statement = connection.createStatement()) {
-          statement.execute("DROP DATABASE IF EXISTS " + database + " WITH (FORCE)");
-        }
-      }
-    }
+    if (database != null) database.close();
     measurements.sort(java.util.Comparator.comparingInt(row -> ((Number) row.get("members")).intValue()));
     var evidence = new LinkedHashMap<String, Object>();
     evidence.put("recordedAt", Instant.now().toString());
@@ -158,49 +93,19 @@ class GroupsControllerCapacityTest {
   void signedControllerFlowAtPilotSizes(int count) throws Exception {
     var result = new LinkedHashMap<String, Object>();
     result.put("members", count);
-    long started = System.nanoTime();
-    var server = ServerSecretParams.generate();
-    var groupSecret = GroupSecretParams.generate();
-    var cipher = new ClientZkGroupCipher(groupSecret);
-    Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
-    Instant redemption = now.truncatedTo(ChronoUnit.DAYS);
-    var clock = Clock.fixed(now, ZoneOffset.UTC);
-    var clientProfiles = new ClientZkProfileOperations(server.getPublicParams());
-    var serverProfiles = new ServerZkProfileOperations(server);
-    var random = new SecureRandom();
-    var identities = new ArrayList<ServiceId>();
-    var request = Group.newBuilder()
-        .setPublicKey(ByteString.copyFrom(groupSecret.getPublicParams().serialize()))
-        .setTitle(encryptedTitle(cipher, "Synthetic alumni announcements"))
-        .setAnnouncementsOnly(true)
-        .setAccessControl(AccessControl.newBuilder()
-            .setMembers(AccessControl.AccessRequired.ADMINISTRATOR)
-            .setAttributes(AccessControl.AccessRequired.ADMINISTRATOR)
-            .setAddFromInviteLink(AccessControl.AccessRequired.UNSATISFIABLE));
-    for (int index = 0; index < count; index++) {
-      var aci = new Aci(UUID.randomUUID());
-      identities.add(aci);
-      byte[] profileBytes = new byte[32];
-      random.nextBytes(profileBytes);
-      var key = new ProfileKey(profileBytes);
-      var context = clientProfiles.createProfileKeyCredentialRequestContext(aci, key);
-      var issued = serverProfiles.issueExpiringProfileKeyCredential(context.getRequest(), aci,
-          key.getCommitment(aci), redemption.plus(2, ChronoUnit.DAYS));
-      var credential = clientProfiles.receiveExpiringProfileKeyCredential(context, issued, now);
-      var presentation = clientProfiles.createProfileKeyCredentialPresentation(groupSecret, credential);
-      request.addMembers(Member.newBuilder()
-          .setRole(index == 0 ? Member.Role.ADMINISTRATOR : Member.Role.DEFAULT)
-          .setPresentation(ByteString.copyFrom(presentation.serialize())));
-    }
-    result.put("fixtureGenerationMs", elapsed(started));
-    var admin = authenticatedUser((Aci) identities.getFirst(), groupSecret, server, redemption);
-    var member = authenticatedUser((Aci) identities.get(1), groupSecret, server, redemption);
+    var fixture = new SyntheticGroupFixture(count);
+    var server = fixture.server;
+    var cipher = fixture.cipher;
+    var clock = Clock.fixed(fixture.now, ZoneOffset.UTC);
+    result.put("fixtureGenerationMs", fixture.generationMs);
+    var admin = fixture.authenticatedUser(0);
+    var member = fixture.authenticatedUser(1);
     var controller = new GroupsController(clock, manager, server, null, null, CONFIG,
         new ExternalGroupCredentialGenerator(new byte[32], clock));
-    Group submitted = Group.parseFrom(request.build().toByteArray());
+    Group submitted = fixture.submitted;
     result.put("createRequestBytes", submitted.getSerializedSize());
 
-    started = System.nanoTime();
+    long started = System.nanoTime();
     GroupResponse created = successful(controller.createGroup(admin, submitted), GroupResponse.class);
     result.put("createControllerAndSqlMs", elapsed(started));
     result.put("persistedGroupBytes", created.getGroup().getSerializedSize());
@@ -214,7 +119,7 @@ class GroupsControllerCapacityTest {
         .hasSize(1);
     assertThat(storage.getGroup(admin.getGroupId()).join()).contains(created.getGroup());
     started = System.nanoTime();
-    verifyEndorsements(created, identities, groupSecret, server, now);
+    fixture.verifyEndorsements(created);
     result.put("clientEndorsementVerificationMs", elapsed(started));
 
     started = System.nanoTime();
@@ -288,9 +193,8 @@ class GroupsControllerCapacityTest {
     assertThat(finalGroup.getMembersCount()).isEqualTo(count);
     assertThat(finalGroup.getMembersList()).extracting(Member::getUserId)
         .containsExactlyElementsOf(created.getGroup().getMembersList().stream().map(Member::getUserId).toList());
-    verifyEndorsements(GroupResponse.newBuilder().setGroup(finalGroup)
-        .setGroupSendEndorsementsResponse(restored.getGroupSendEndorsementsResponse()).build(),
-        identities, groupSecret, server, now);
+    fixture.verifyEndorsements(GroupResponse.newBuilder().setGroup(finalGroup)
+        .setGroupSendEndorsementsResponse(restored.getGroupSendEndorsementsResponse()).build());
     var history = manager.getChangeRecords(admin.getGroupId(), finalGroup, 7, true, true, 0, 5).join();
     assertThat(history).hasSize(5);
     assertThat(history.getLast().getGroupState()).isEqualTo(finalGroup);
@@ -316,18 +220,6 @@ class GroupsControllerCapacityTest {
         .isInstanceOf(BadRequestException.class).hasMessage("group size cannot exceed " + CAP);
   }
 
-  private GroupUser authenticatedUser(Aci aci, GroupSecretParams group, ServerSecretParams server,
-      Instant redemption) throws Exception {
-    var pni = new Pni(UUID.randomUUID());
-    var issued = new ServerZkAuthOperations(server).issueAuthCredentialWithPniZkc(aci, pni, redemption);
-    var client = new ClientZkAuthOperations(server.getPublicParams());
-    var credential = client.receiveAuthCredentialWithPniAsServiceId(aci, pni, redemption.getEpochSecond(), issued);
-    var presentation = client.createAuthCredentialPresentation(group, credential);
-    return new GroupUserAuthenticator(new ServerZkAuthOperations(server)).authenticate(new BasicCredentials(
-        HexFormat.of().formatHex(group.getPublicParams().serialize()),
-        HexFormat.of().formatHex(presentation.serialize()))).orElseThrow();
-  }
-
   private static ByteString encryptedTitle(ClientZkGroupCipher cipher, String title) throws Exception {
     return ByteString.copyFrom(cipher.encryptBlob(GroupAttributeBlob.newBuilder().setTitle(title).build().toByteArray()));
   }
@@ -347,15 +239,6 @@ class GroupsControllerCapacityTest {
     assertThat(change.getServerSignature()).isNotEmpty();
     server.getPublicParams().verifySignature(change.getActions().toByteArray(),
         new NotarySignature(change.getServerSignature().toByteArray()));
-  }
-
-  private static void verifyEndorsements(GroupResponse group, List<ServiceId> identities,
-      GroupSecretParams secret, ServerSecretParams server, Instant now) throws Exception {
-    var response = new GroupSendEndorsementsResponse(group.getGroupSendEndorsementsResponse().toByteArray());
-    var endorsements = response.receive(identities, (Aci) identities.getFirst(), now, secret, server.getPublicParams());
-    var token = endorsements.combinedEndorsement().toFullToken(secret, response.getExpiration());
-    token.verify(identities.subList(1, identities.size()), now,
-        GroupSendDerivedKeyPair.forExpiration(response.getExpiration(), server));
   }
 
   private static long elapsed(long start) { return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start); }
