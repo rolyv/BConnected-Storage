@@ -47,6 +47,12 @@ public class GroupsV1Controller extends GroupsController {
     super(clock, groupsManager, serverSecretParams, groupConfiguration, externalGroupCredentialGenerator);
   }
 
+  public GroupsV1Controller(Clock clock, GroupsManager groupsManager, ServerSecretParams serverSecretParams,
+      GroupConfiguration groupConfiguration, ExternalGroupCredentialGenerator externalGroupCredentialGenerator,
+      org.signal.storageservice.avatars.GroupAvatarService avatars) {
+    super(clock, groupsManager, serverSecretParams, groupConfiguration, externalGroupCredentialGenerator, avatars);
+  }
+
   @Override
   @GET
   @Produces(ProtocolBufferMediaType.APPLICATION_PROTOBUF)

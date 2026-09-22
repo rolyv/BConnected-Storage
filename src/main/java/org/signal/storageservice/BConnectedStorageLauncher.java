@@ -36,7 +36,7 @@ public final class BConnectedStorageLauncher {
     if (environment.containsKey("GROUP_STORAGE_PASSWORD_ENV")) {
       postgres.put("passwordEnvironmentVariable", environment.get("GROUP_STORAGE_PASSWORD_ENV"));
     }
-    return Map.of(
+    var configuration = new java.util.LinkedHashMap<String, Object>(Map.of(
         "postgres", postgres,
         "authentication", Map.of("key", authentication),
         "zkConfig", Map.of("serverSecret", Base64.getEncoder().encodeToString(groupSecret)),
@@ -47,7 +47,14 @@ public final class BConnectedStorageLauncher {
                 "bindHost", environment.getOrDefault("GROUP_STORAGE_BIND_HOST", "127.0.0.1"))),
             "adminConnectors", List.of(Map.of("type", "http", "port", adminPort, "bindHost", "127.0.0.1")),
             "requestLog", Map.of("appenders", List.of())),
-        "logging", Map.of("level", "INFO", "appenders", List.of(Map.of("type", "console"))));
+        "logging", Map.of("level", "INFO", "appenders", List.of(Map.of("type", "console")))));
+    String bucket = environment.get("GROUP_AVATAR_BUCKET");
+    String signer = environment.get("GROUP_AVATAR_SIGNING_SERVICE_ACCOUNT");
+    if (bucket != null || signer != null) {
+      var avatars = new org.signal.storageservice.configuration.GcsGroupAvatarConfiguration(bucket, signer);
+      configuration.put("groupAvatars", Map.of("bucket", avatars.bucket(), "signingServiceAccount", avatars.signingServiceAccount()));
+    }
+    return configuration;
   }
 
   private static byte[] decode(Map<String, String> secrets, String key, int size) {

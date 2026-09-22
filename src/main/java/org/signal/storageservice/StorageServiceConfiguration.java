@@ -29,6 +29,12 @@ public class StorageServiceConfiguration extends Configuration {
 
   @JsonProperty
   @Valid
+  private org.signal.storageservice.configuration.GcsGroupAvatarConfiguration groupAvatars;
+
+  public org.signal.storageservice.configuration.GcsGroupAvatarConfiguration getGroupAvatars() { return groupAvatars; }
+
+  @JsonProperty
+  @Valid
   private BigTableConfiguration bigtable;
 
   @JsonProperty

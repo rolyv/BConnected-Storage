@@ -133,8 +133,18 @@ public class StorageService extends Application<StorageServiceConfiguration> {
     environment.jersey().register(new HealthCheckController());
     environment.jersey().register(readiness);
     environment.jersey().register(new StorageController(storageManager));
-    environment.jersey().register(new GroupsController(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator));
-    environment.jersey().register(new GroupsV1Controller(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator));
+    org.signal.storageservice.avatars.GroupAvatarService avatars = null;
+    if (config.getGroupAvatars() != null) {
+      var objects = config.getGroupAvatars().build(Clock.systemUTC());
+      environment.lifecycle().manage(new io.dropwizard.lifecycle.Managed() {
+        @Override public void stop() throws Exception { objects.close(); }
+      });
+      var workers = environment.lifecycle().executorService("group-avatar-%d").minThreads(4).maxThreads(4)
+          .workQueue(new java.util.concurrent.ArrayBlockingQueue<>(16)).build();
+      avatars = new org.signal.storageservice.avatars.GroupAvatarService(objects, groupsManager, workers, Clock.systemUTC());
+    }
+    environment.jersey().register(new GroupsController(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator, avatars));
+    environment.jersey().register(new GroupsV1Controller(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator, avatars));
 
     MetricsHttpEventHandler.configure(environment, Metrics.globalRegistry, Set.of("/health-check"));
 

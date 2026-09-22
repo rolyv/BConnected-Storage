@@ -101,6 +101,7 @@ public class GroupsController {
   private final ServerSecretParams serverSecretParams;
   private final GroupValidator groupValidator;
   private final GroupChangeApplicator groupChangeApplicator;
+  private final org.signal.storageservice.avatars.GroupAvatarService avatars;
 
   private final Timer getGroupTimer = Metrics.timer(name(GroupsController.class, "getGroup"));
   private final Timer getGroupLogsTimer = Metrics.timer(name(GroupsController.class, "getGroupLogs"));
@@ -116,6 +117,12 @@ public class GroupsController {
       ServerSecretParams serverSecretParams,
       GroupConfiguration groupConfiguration,
       ExternalGroupCredentialGenerator externalGroupCredentialGenerator) {
+    this(clock, groupsManager, serverSecretParams, groupConfiguration, externalGroupCredentialGenerator, null);
+  }
+
+  public GroupsController(Clock clock, GroupsManager groupsManager, ServerSecretParams serverSecretParams,
+      GroupConfiguration groupConfiguration, ExternalGroupCredentialGenerator externalGroupCredentialGenerator,
+      org.signal.storageservice.avatars.GroupAvatarService avatars) {
     this.clock = clock;
     this.groupsManager = groupsManager;
     this.groupConfiguration = groupConfiguration;
@@ -123,6 +130,7 @@ public class GroupsController {
     this.groupValidator = new GroupValidator(new ServerZkProfileOperations(serverSecretParams), groupConfiguration);
     this.groupChangeApplicator = new GroupChangeApplicator(this.groupValidator);
     this.externalGroupCredentialGenerator = externalGroupCredentialGenerator;
+    this.avatars = avatars;
   }
 
   @GET
@@ -348,6 +356,7 @@ public class GroupsController {
   @Produces(ProtocolBufferMediaType.APPLICATION_PROTOBUF)
   @Path("/avatar/form")
   public CompletableFuture<Response> getAvatarUploadForm(@Auth GroupUser user) {
+    if (avatars != null) return avatars.upload(user);
     return groupsManager.getGroup(user.getGroupId()).thenApply(group -> {
 
       if (group.isPresent()) {
@@ -363,6 +372,15 @@ public class GroupsController {
       // No object-storage credential is issued until an owned GCS provider is connected.
       throw new jakarta.ws.rs.ServiceUnavailableException("Group avatar uploads are unavailable in this deployment");
     });
+  }
+
+  @GET
+  @Produces(ProtocolBufferMediaType.APPLICATION_PROTOBUF)
+  @Path("/avatar/{objectId}")
+  public CompletableFuture<Response> getAvatarDownload(@Auth GroupUser user, @PathParam("objectId") String objectId,
+      @QueryParam("inviteLinkPassword") String inviteLinkPassword) {
+    if (avatars == null) throw new jakarta.ws.rs.ServiceUnavailableException("Group avatars are unavailable in this deployment");
+    return avatars.download(user, objectId, inviteLinkPassword);
   }
 
   @PUT

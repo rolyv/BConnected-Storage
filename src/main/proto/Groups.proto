@@ -19,6 +19,16 @@ message AvatarUploadAttributes {
   string date = 5;
   string policy = 6;
   string signature = 7;
+  // Owned GCS endpoint. Never infer a public CDN URL from the opaque key.
+  string upload_url = 8;
+  uint64 expires_at = 9;
+  uint32 max_content_length = 10;
+}
+
+message AvatarDownloadAttributes {
+  string url = 1;
+  uint64 expires_at = 2;
+  uint32 content_length = 3;
 }
 
 // Stored data

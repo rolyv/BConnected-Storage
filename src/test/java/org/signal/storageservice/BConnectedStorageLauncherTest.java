@@ -34,6 +34,18 @@ class BConnectedStorageLauncherTest {
         .isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining("do-not-log-this");
   }
 
+  @Test void privateAvatarsRequireBothOwnedBucketAndSignerWithoutReadingAdc() throws Exception {
+    var mapper = Jackson.newObjectMapper();
+    var config = mapper.convertValue(BConnectedStorageLauncher.configuration(secrets(), Map.of(
+        "GROUP_AVATAR_BUCKET", "bconnected-test-group-avatars",
+        "GROUP_AVATAR_SIGNING_SERVICE_ACCOUNT", "group-avatar@test.iam.gserviceaccount.com")), StorageServiceConfiguration.class);
+    assertThat(config.getGroupAvatars().bucket()).isEqualTo("bconnected-test-group-avatars");
+    assertThatThrownBy(() -> BConnectedStorageLauncher.configuration(secrets(), Map.of("GROUP_AVATAR_BUCKET", "valid-bucket")))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> BConnectedStorageLauncher.configuration(secrets(), Map.of("GROUP_AVATAR_SIGNING_SERVICE_ACCOUNT", "group-avatar@test.iam.gserviceaccount.com")))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   @Test void requiresDistinctApplicationAndAdminPorts() {
     assertThatThrownBy(() -> BConnectedStorageLauncher.configuration(secrets(), Map.of("PORT", "8081")))
         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Distinct valid");
