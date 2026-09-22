@@ -100,7 +100,7 @@ class GroupsControllerCapacityTest {
     result.put("fixtureGenerationMs", fixture.generationMs);
     var admin = fixture.authenticatedUser(0);
     var member = fixture.authenticatedUser(1);
-    var controller = new GroupsController(clock, manager, server, null, null, CONFIG,
+    var controller = new GroupsController(clock, manager, server, CONFIG,
         new ExternalGroupCredentialGenerator(new byte[32], clock));
     Group submitted = fixture.submitted;
     result.put("createRequestBytes", submitted.getSerializedSize());

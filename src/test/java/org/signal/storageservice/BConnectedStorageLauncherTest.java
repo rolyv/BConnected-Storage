@@ -25,7 +25,6 @@ class BConnectedStorageLauncherTest {
       assertThat(factory.getValidator().validate(configuration)).isEmpty();
     }
     assertThat(configuration.getBigTableConfiguration()).isNull();
-    assertThat(configuration.getCdnConfiguration()).isNull();
     assertThat(configuration.getGroupConfiguration().maxGroupSize()).isEqualTo(10000);
     assertThat(configuration.getAuthenticationConfiguration().getKey()).hasSize(32);
   }
@@ -47,7 +46,8 @@ class BConnectedStorageLauncherTest {
     assertThat(mapper.convertValue(mixed, StorageServiceConfiguration.class).isPersistenceConfigurationValid()).isFalse();
     mixed.remove("bigtable");
     mixed.put("cdn", Map.of());
-    assertThat(mapper.convertValue(mixed, StorageServiceConfiguration.class).isPersistenceConfigurationValid()).isFalse();
+    assertThatThrownBy(() -> mapper.convertValue(mixed, StorageServiceConfiguration.class))
+        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Legacy CDN");
     mixed.remove("cdn");
     mixed.remove("postgres");
     assertThat(mapper.convertValue(mixed, StorageServiceConfiguration.class).isPersistenceConfigurationValid()).isFalse();

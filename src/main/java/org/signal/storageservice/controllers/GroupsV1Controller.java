@@ -28,8 +28,6 @@ import org.signal.storageservice.auth.GroupUser;
 import org.signal.storageservice.configuration.GroupConfiguration;
 import org.signal.storageservice.providers.NoUnknownFields;
 import org.signal.storageservice.providers.ProtocolBufferMediaType;
-import org.signal.storageservice.s3.PolicySigner;
-import org.signal.storageservice.s3.PostPolicyGenerator;
 import org.signal.storageservice.storage.GroupsManager;
 import org.signal.storageservice.storage.protos.groups.Group;
 import org.signal.storageservice.storage.protos.groups.GroupChange;
@@ -44,11 +42,9 @@ public class GroupsV1Controller extends GroupsController {
       Clock clock,
       GroupsManager groupsManager,
       ServerSecretParams serverSecretParams,
-      PolicySigner policySigner,
-      PostPolicyGenerator policyGenerator,
       GroupConfiguration groupConfiguration,
       ExternalGroupCredentialGenerator externalGroupCredentialGenerator) {
-    super(clock, groupsManager, serverSecretParams, policySigner, policyGenerator, groupConfiguration, externalGroupCredentialGenerator);
+    super(clock, groupsManager, serverSecretParams, groupConfiguration, externalGroupCredentialGenerator);
   }
 
   @Override

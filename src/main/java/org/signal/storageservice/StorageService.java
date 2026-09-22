@@ -47,8 +47,6 @@ import org.signal.storageservice.providers.CompletionExceptionMapper;
 import org.signal.storageservice.providers.InvalidProtocolBufferExceptionMapper;
 import org.signal.storageservice.providers.ProtocolBufferMessageBodyProvider;
 import org.signal.storageservice.providers.ProtocolBufferValidationErrorMessageBodyWriter;
-import org.signal.storageservice.s3.PolicySigner;
-import org.signal.storageservice.s3.PostPolicyGenerator;
 import org.signal.storageservice.storage.GroupsManager;
 import org.signal.storageservice.storage.StorageManager;
 import org.signal.storageservice.util.UncaughtExceptionHandler;
@@ -126,8 +124,6 @@ public class StorageService extends Application<StorageServiceConfiguration> {
     AuthFilter<BasicCredentials, User>      userAuthFilter      = new BasicCredentialAuthFilter.Builder<User>().setAuthenticator(userAuthenticator).buildAuthFilter();
     AuthFilter<BasicCredentials, GroupUser> groupUserAuthFilter = new BasicCredentialAuthFilter.Builder<GroupUser>().setAuthenticator(groupUserAuthenticator).buildAuthFilter();
 
-    PolicySigner        policySigner        = config.getPostgresConfiguration() != null ? null : new PolicySigner(config.getCdnConfiguration().getAccessSecret(), config.getCdnConfiguration().getRegion());
-    PostPolicyGenerator postPolicyGenerator = config.getPostgresConfiguration() != null ? null : new PostPolicyGenerator(config.getCdnConfiguration().getRegion(), config.getCdnConfiguration().getBucket(), config.getCdnConfiguration().getAccessKey());
 
     environment.jersey().register(new PolymorphicAuthDynamicFeature<>(ImmutableMap.of(User.class, userAuthFilter, GroupUser.class, groupUserAuthFilter)));
     environment.jersey().register(new PolymorphicAuthValueFactoryProvider.Binder<>(ImmutableSet.of(User.class, GroupUser.class)));
@@ -137,8 +133,8 @@ public class StorageService extends Application<StorageServiceConfiguration> {
     environment.jersey().register(new HealthCheckController());
     environment.jersey().register(readiness);
     environment.jersey().register(new StorageController(storageManager));
-    environment.jersey().register(new GroupsController(Clock.systemUTC(), groupsManager, serverSecretParams, policySigner, postPolicyGenerator, config.getGroupConfiguration(), externalGroupCredentialGenerator));
-    environment.jersey().register(new GroupsV1Controller(Clock.systemUTC(), groupsManager, serverSecretParams, policySigner, postPolicyGenerator, config.getGroupConfiguration(), externalGroupCredentialGenerator));
+    environment.jersey().register(new GroupsController(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator));
+    environment.jersey().register(new GroupsV1Controller(Clock.systemUTC(), groupsManager, serverSecretParams, config.getGroupConfiguration(), externalGroupCredentialGenerator));
 
     MetricsHttpEventHandler.configure(environment, Metrics.globalRegistry, Set.of("/health-check"));
 

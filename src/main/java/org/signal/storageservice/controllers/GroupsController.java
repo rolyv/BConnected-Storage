@@ -21,8 +21,6 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.LinkedList;
@@ -66,11 +64,8 @@ import org.signal.storageservice.groups.GroupValidator;
 import org.signal.storageservice.metrics.UserAgentTagUtil;
 import org.signal.storageservice.providers.NoUnknownFields;
 import org.signal.storageservice.providers.ProtocolBufferMediaType;
-import org.signal.storageservice.s3.PolicySigner;
-import org.signal.storageservice.s3.PostPolicyGenerator;
 import org.signal.storageservice.storage.GroupsManager;
 import org.signal.storageservice.storage.protos.groups.AccessControl;
-import org.signal.storageservice.storage.protos.groups.AvatarUploadAttributes;
 import org.signal.storageservice.storage.protos.groups.ExternalGroupCredential;
 import org.signal.storageservice.storage.protos.groups.Group;
 import org.signal.storageservice.storage.protos.groups.GroupChange;
@@ -83,7 +78,6 @@ import org.signal.storageservice.storage.protos.groups.GroupResponse;
 import org.signal.storageservice.storage.protos.groups.Member;
 import org.signal.storageservice.storage.protos.groups.MemberPendingProfileKey;
 import org.signal.storageservice.util.CollectionUtil;
-import org.signal.storageservice.util.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,10 +106,6 @@ public class GroupsController {
   private final Timer getGroupLogsTimer = Metrics.timer(name(GroupsController.class, "getGroupLogs"));
   private final Timer createGroupTimer = Metrics.timer(name(GroupsController.class, "createGroup"));
   private final Timer modifyGroupTimer = Metrics.timer(name(GroupsController.class, "modifyGroup"));
-
-  private final PolicySigner policySigner;
-  private final PostPolicyGenerator policyGenerator;
-
   private final ExternalGroupCredentialGenerator externalGroupCredentialGenerator;
 
   private static final Logger logger = LoggerFactory.getLogger(GroupsController.class);
@@ -124,8 +114,6 @@ public class GroupsController {
       Clock clock,
       GroupsManager groupsManager,
       ServerSecretParams serverSecretParams,
-      PolicySigner policySigner,
-      PostPolicyGenerator policyGenerator,
       GroupConfiguration groupConfiguration,
       ExternalGroupCredentialGenerator externalGroupCredentialGenerator) {
     this.clock = clock;
@@ -134,8 +122,6 @@ public class GroupsController {
     this.serverSecretParams = serverSecretParams;
     this.groupValidator = new GroupValidator(new ServerZkProfileOperations(serverSecretParams), groupConfiguration);
     this.groupChangeApplicator = new GroupChangeApplicator(this.groupValidator);
-    this.policySigner = policySigner;
-    this.policyGenerator = policyGenerator;
     this.externalGroupCredentialGenerator = externalGroupCredentialGenerator;
   }
 
@@ -362,10 +348,6 @@ public class GroupsController {
   @Produces(ProtocolBufferMediaType.APPLICATION_PROTOBUF)
   @Path("/avatar/form")
   public CompletableFuture<Response> getAvatarUploadForm(@Auth GroupUser user) {
-    if (policySigner == null || policyGenerator == null) {
-      throw new jakarta.ws.rs.ServiceUnavailableException("Group avatar uploads are unavailable in this deployment");
-    }
-
     return groupsManager.getGroup(user.getGroupId()).thenApply(group -> {
 
       if (group.isPresent()) {
@@ -378,27 +360,8 @@ public class GroupsController {
         }
       }
 
-      final byte[] object = new byte[16];
-      new SecureRandom().nextBytes(object);
-
-      final String objectName = "groups/"
-          + Base64.encodeBase64URLSafeString(user.getGroupId().toByteArray())
-          + "/"
-          + Base64.encodeBase64URLSafeString(object);
-      final ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-      final Pair<String, String> policy = policyGenerator.createFor(now, objectName, 3 * 1024 * 1024);
-      final String signature = policySigner.getSignature(now, policy.second());
-
-      return Response.ok(AvatarUploadAttributes.newBuilder()
-          .setKey(objectName)
-          .setCredential(policy.first())
-          .setAcl("private")
-          .setAlgorithm("AWS4-HMAC-SHA256")
-          .setDate(now.format(PostPolicyGenerator.AWS_DATE_TIME))
-          .setPolicy(policy.second())
-          .setSignature(signature)
-          .build())
-          .build();
+      // No object-storage credential is issued until an owned GCS provider is connected.
+      throw new jakarta.ws.rs.ServiceUnavailableException("Group avatar uploads are unavailable in this deployment");
     });
   }
 

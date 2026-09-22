@@ -45,8 +45,6 @@ import org.signal.storageservice.configuration.GroupConfiguration;
 import org.signal.storageservice.providers.InvalidProtocolBufferExceptionMapper;
 import org.signal.storageservice.providers.ProtocolBufferMessageBodyProvider;
 import org.signal.storageservice.providers.ProtocolBufferValidationErrorMessageBodyWriter;
-import org.signal.storageservice.s3.PolicySigner;
-import org.signal.storageservice.s3.PostPolicyGenerator;
 import org.signal.storageservice.storage.GroupsManager;
 import org.signal.storageservice.storage.protos.groups.AccessControl;
 import org.signal.storageservice.storage.protos.groups.Group;
@@ -76,8 +74,6 @@ abstract class BaseGroupsControllerTest {
   protected final ByteString validUserFourPniId = ByteString.copyFrom(new ClientZkAuthOperations(AuthHelper.GROUPS_SERVER_KEY.getPublicParams()).createAuthCredentialPresentation(groupSecretParams, AuthHelper.VALID_USER_FOUR_AUTH_CREDENTIAL).getPniCiphertext().serialize());
   protected final GroupsManager groupsManager = mock(GroupsManager.class);
   protected final TestClock clock = TestClock.pinned(Instant.now());
-  protected final PostPolicyGenerator postPolicyGenerator = new PostPolicyGenerator("us-west-1", "profile-bucket", "accessKey");
-  protected final PolicySigner policySigner = new PolicySigner("accessSecret", "us-west-1");
   protected final Group group = Group.newBuilder()
       .setPublicKey(ByteString.copyFrom(groupPublicParams.serialize()))
       .setAccessControl(AccessControl.newBuilder()
@@ -108,8 +104,8 @@ abstract class BaseGroupsControllerTest {
                                                                  .addProvider(new ProtocolBufferValidationErrorMessageBodyWriter())
                                                                  .addProvider(new InvalidProtocolBufferExceptionMapper())
                                                                  .setMapper(SystemMapper.getMapper())
-                                                                 .addResource(new GroupsV1Controller(clock, groupsManager, AuthHelper.GROUPS_SERVER_KEY, policySigner, postPolicyGenerator, getGroupConfiguration(), groupCredentialGenerator))
-                                                                 .addResource(new GroupsController(clock, groupsManager, AuthHelper.GROUPS_SERVER_KEY, policySigner, postPolicyGenerator, getGroupConfiguration(), groupCredentialGenerator))
+                                                                 .addResource(new GroupsV1Controller(clock, groupsManager, AuthHelper.GROUPS_SERVER_KEY, getGroupConfiguration(), groupCredentialGenerator))
+                                                                 .addResource(new GroupsController(clock, groupsManager, AuthHelper.GROUPS_SERVER_KEY, getGroupConfiguration(), groupCredentialGenerator))
                                                                  .build();
 
   protected GroupConfiguration getGroupConfiguration() {

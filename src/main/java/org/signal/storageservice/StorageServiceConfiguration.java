@@ -10,7 +10,6 @@ import com.vdurmont.semver4j.Semver;
 import io.dropwizard.core.Configuration;
 import org.signal.storageservice.configuration.AuthenticationConfiguration;
 import org.signal.storageservice.configuration.BigTableConfiguration;
-import org.signal.storageservice.configuration.CdnConfiguration;
 import org.signal.storageservice.configuration.OpenTelemetryConfiguration;
 import org.signal.storageservice.configuration.GroupConfiguration;
 import org.signal.storageservice.configuration.WarmupConfiguration;
@@ -39,9 +38,9 @@ public class StorageServiceConfiguration extends Configuration {
   public PostgresConfiguration getPostgresConfiguration() { return postgres; }
 
   @JsonIgnore
-  @AssertTrue(message = "Select exactly one of PostgreSQL or Bigtable; legacy Bigtable also requires CDN configuration")
+  @AssertTrue(message = "Select exactly one of PostgreSQL or Bigtable")
   public boolean isPersistenceConfigurationValid() {
-    return postgres != null ? bigtable == null && cdn == null : bigtable != null && cdn != null;
+    return (postgres != null) != (bigtable != null);
   }
 
   @JsonProperty
@@ -54,9 +53,10 @@ public class StorageServiceConfiguration extends Configuration {
   @NotNull
   private ZkConfiguration zkConfig;
 
-  @JsonProperty
-  @Valid
-  private CdnConfiguration cdn;
+  @JsonProperty("cdn")
+  public void rejectLegacyCdn(Object ignored) {
+    throw new IllegalArgumentException("Legacy CDN configuration is no longer supported");
+  }
 
   @JsonProperty
   @Valid
@@ -87,10 +87,6 @@ public class StorageServiceConfiguration extends Configuration {
 
   public ZkConfiguration getZkConfiguration() {
     return zkConfig;
-  }
-
-  public CdnConfiguration getCdnConfiguration() {
-    return cdn;
   }
 
   public GroupConfiguration getGroupConfiguration() {

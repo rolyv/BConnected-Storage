@@ -58,7 +58,6 @@ import org.signal.storageservice.groups.GroupChangeApplicator;
 import org.signal.storageservice.groups.GroupValidator;
 import org.signal.storageservice.providers.ProtocolBufferMediaType;
 import org.signal.storageservice.storage.protos.groups.AccessControl;
-import org.signal.storageservice.storage.protos.groups.AvatarUploadAttributes;
 import org.signal.storageservice.storage.protos.groups.ExternalGroupCredential;
 import org.signal.storageservice.storage.protos.groups.Group;
 import org.signal.storageservice.storage.protos.groups.GroupChange;
@@ -6015,20 +6014,6 @@ class GroupsControllerTest extends BaseGroupsControllerTest {
                                  .get();
 
     assertThat(response.getStatus()).isEqualTo(expectedMemberStatusCode);
-    if (expectedMemberStatusCode == 200) {
-      assertThat(response.hasEntity()).isTrue();
-
-      AvatarUploadAttributes uploadAttributes = AvatarUploadAttributes.parseFrom(
-          response.readEntity(InputStream.class).readAllBytes());
-
-      assertThat(uploadAttributes.getKey()).startsWith("groups/" + Base64.getUrlEncoder().withoutPadding()
-          .encodeToString(groupPublicParams.getGroupIdentifier().serialize()));
-      assertThat(uploadAttributes.getAcl()).isEqualTo("private");
-      assertThat(uploadAttributes.getCredential()).isNotEmpty();
-      assertThat(uploadAttributes.getDate()).isNotEmpty();
-      assertThat(uploadAttributes.getSignature()).isNotEmpty();
-    }
-
     // Verify that non-member gets 403
     response = resources.getJerseyTest()
         .target("/v2/groups/avatar/form")
@@ -6043,9 +6028,9 @@ class GroupsControllerTest extends BaseGroupsControllerTest {
 
   static List<Arguments> testGetAvatarUpload() {
     return List.of(
-        Arguments.of(AccessControl.AccessRequired.MEMBER, true, false, 200),
-        Arguments.of(AccessControl.AccessRequired.MEMBER, false, false, 200),
-        Arguments.of(AccessControl.AccessRequired.ADMINISTRATOR, true, false, 200),
+        Arguments.of(AccessControl.AccessRequired.MEMBER, true, false, 503),
+        Arguments.of(AccessControl.AccessRequired.MEMBER, false, false, 503),
+        Arguments.of(AccessControl.AccessRequired.ADMINISTRATOR, true, false, 503),
         Arguments.of(AccessControl.AccessRequired.ADMINISTRATOR, false, false, 403),
         Arguments.of(AccessControl.AccessRequired.MEMBER, false, true, 423)
     );
