@@ -40,6 +40,8 @@
         <logback.version>1.5.38</logback.version>
         <logback-access.version>2.0.14</logback-access.version>
         <micrometer-bom.version>1.17.0</micrometer-bom.version>
+        <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
+        <tink.version>1.23.0</tink.version>
         <!-- There are a few sneaky compatibility issues with protobuf versions:
 
         1. This must be less than or equal to the value from Google libraries-bom; see
@@ -198,6 +200,17 @@
             <groupId>com.vdurmont</groupId>
             <artifactId>semver4j</artifactId>
             <version>${semver4j.version}</version>
+        </dependency>
+        <!-- Standard JWS/Ed25519 implementation for the unregistered owned-group manifest service. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.crypto.tink</groupId>
+            <artifactId>tink</artifactId>
+            <version>${tink.version}</version>
         </dependency>
 
         <dependency>
