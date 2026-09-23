@@ -43,8 +43,9 @@ class PostgresStorageTest {
     dataSource.setPassword(System.getenv("BCONNECTED_TEST_POSTGRES_PASSWORD"));
     try (var c = dataSource.getConnection(); var s = c.createStatement()) {
       s.execute(Files.readString(Path.of("bconnected/migrations/001-postgres.sql")));
+      s.execute(Files.readString(Path.of("bconnected/migrations/002-group-authority.sql")));
       s.execute("ALTER TABLE group_storage.items DROP CONSTRAINT IF EXISTS test_reject_value");
-      s.execute("TRUNCATE group_storage.groups,group_storage.group_logs,group_storage.manifests,group_storage.items");
+      s.execute("TRUNCATE group_storage.groups,group_storage.group_logs,group_storage.manifests,group_storage.items,group_storage.group_namespaces CASCADE");
     }
     executor = Executors.newFixedThreadPool(8);
     store = new PostgresStorage(dataSource, executor);

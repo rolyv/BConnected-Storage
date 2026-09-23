@@ -45,6 +45,7 @@ final class DisposableGroupDatabase implements AutoCloseable {
       }
       try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
         statement.execute(Files.readString(Path.of("bconnected/migrations/001-postgres.sql")));
+      statement.execute(Files.readString(Path.of("bconnected/migrations/002-group-authority.sql")));
       }
       executor = Executors.newFixedThreadPool(2);
       storage = new PostgresStorage(dataSource, executor);

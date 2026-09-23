@@ -1,0 +1,27 @@
+// Copyright 2026 BConnected contributors. SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package bconnected;
+option java_package = "org.signal.storageservice.storage.protos.authority";
+option java_multiple_files = true;
+
+// Internal persistence format, NOT an authenticated/signed wire manifest or an admission grant.
+message AuthorityRosterEntry {
+  enum State { UNKNOWN = 0; ACTIVE = 1; INVITED = 2; }
+  string aci = 1;
+  bytes declared_principal = 2;
+  State state = 3;
+  uint32 role = 4;
+  string enrollment_id = 5;
+  uint64 approval_epoch = 6;
+}
+message AuthoritySnapshot {
+  bytes group_id = 1;
+  uint64 revision = 2;
+  string creator_aci = 3;
+  // Exact normalized native Group bytes returned to a future manifest consumer; hash these bytes as-is.
+  bytes native_group = 4;
+  bytes native_sha256 = 5;
+  repeated AuthorityRosterEntry roster = 6;
+  // Directory publication has no supported transition in this foundation.
+  bool directory_listed = 7;
+}

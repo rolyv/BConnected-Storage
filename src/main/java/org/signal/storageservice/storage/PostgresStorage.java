@@ -57,7 +57,7 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
     }
   }
 
-  private static void lock(Connection connection, String namespace, byte[] identity) throws Exception {
+  static void lock(Connection connection, String namespace, byte[] identity) throws Exception {
     MessageDigest digest = MessageDigest.getInstance("SHA-256");
     digest.update(namespace.getBytes(StandardCharsets.UTF_8));
     digest.update((byte) 0);
@@ -68,7 +68,7 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
     }
   }
 
-  private static void lockGroup(Connection c, ByteString id) throws Exception {
+  static void lockGroup(Connection c, ByteString id) throws Exception {
     lock(c, "group_storage:group", id.toByteArray());
   }
 
@@ -81,10 +81,13 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
   }
 
   private static Optional<Group> readGroup(Connection c, ByteString id) throws Exception {
-    try (var s = c.prepareStatement("SELECT data FROM group_storage.groups WHERE group_id=?")) {
+    try (var s = c.prepareStatement("SELECT g.data,n.owned FROM group_storage.group_namespaces n LEFT JOIN group_storage.groups g USING(group_id) WHERE n.group_id=?")) {
       s.setBytes(1, id.toByteArray());
       try (var rows = s.executeQuery()) {
-        return rows.next() ? Optional.of(Group.parseFrom(rows.getBytes(1))) : Optional.empty();
+        if (!rows.next()) return Optional.empty();
+        if (rows.getBoolean(2)) throw new IllegalStateException("Owned group requires account authorization");
+        byte[] data = rows.getBytes(1);
+        return data == null ? Optional.empty() : Optional.of(Group.parseFrom(data));
       }
     }
   }
@@ -103,7 +106,7 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
   }
 
   private static boolean replaceGroup(Connection c, ByteString id, Group group) throws SQLException {
-    try (var s = c.prepareStatement("UPDATE group_storage.groups SET version=?,data=? WHERE group_id=? AND version=?")) {
+    try (var s = c.prepareStatement("UPDATE group_storage.groups SET version=?,data=? WHERE group_id=? AND version=? AND NOT authority_owned")) {
       s.setLong(1, Integer.toUnsignedLong(group.getVersion()));
       s.setBytes(2, group.toByteArray());
       s.setBytes(3, id.toByteArray());
@@ -118,11 +121,12 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
 
   private static boolean append(Connection c, ByteString id, int version, GroupChange change, Group state) throws SQLException {
     if (version != state.getVersion()) throw new IllegalArgumentException("Group log/state versions must match");
-    try (var s = c.prepareStatement("INSERT INTO group_storage.group_logs(group_id,version,change,state) VALUES(?,?,?,?) ON CONFLICT DO NOTHING")) {
+    try (var s = c.prepareStatement("INSERT INTO group_storage.group_logs(group_id,version,change,state) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM group_storage.groups WHERE group_id=? AND NOT authority_owned) ON CONFLICT DO NOTHING")) {
       s.setBytes(1, id.toByteArray());
       s.setLong(2, Integer.toUnsignedLong(version));
       s.setBytes(3, change.toByteArray());
       s.setBytes(4, state.toByteArray());
+      s.setBytes(5, id.toByteArray());
       return s.executeUpdate() == 1;
     }
   }
@@ -154,7 +158,7 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
     return transaction(c -> {
       List<GroupChangeState> results = new ArrayList<>();
       boolean seenCurrent = false;
-      try (var s = c.prepareStatement("SELECT change,state FROM group_storage.group_logs WHERE group_id=? AND version>=? AND version<? ORDER BY version")) {
+      try (var s = c.prepareStatement("SELECT change,state FROM group_storage.group_logs WHERE group_id=? AND version>=? AND version<? AND EXISTS (SELECT 1 FROM group_storage.groups g WHERE g.group_id=group_logs.group_id AND NOT g.authority_owned) ORDER BY version")) {
         s.setBytes(1, id.toByteArray());
         s.setLong(2, Integer.toUnsignedLong(from));
         s.setLong(3, Integer.toUnsignedLong(to));
@@ -273,7 +277,7 @@ public final class PostgresStorage implements GroupsStore, StorageStore {
   /** Checks all required tables every time; an open HTTP listener alone is not readiness. */
   public void checkReady() throws SQLException {
     try (Connection c = dataSource.getConnection(); var s = c.createStatement()) {
-      for (String table : List.of("groups", "group_logs", "manifests", "items")) {
+      for (String table : List.of("groups", "group_logs", "manifests", "items", "group_namespaces", "group_authority", "group_roster", "group_authority_requests", "group_authority_outbox")) {
         try (var rows = s.executeQuery("SELECT 1 FROM group_storage." + table + " LIMIT 1")) { rows.next(); }
       }
     }
