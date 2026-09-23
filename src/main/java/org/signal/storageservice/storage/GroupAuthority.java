@@ -162,6 +162,12 @@ public final class GroupAuthority {
   /** Create only an entirely unused namespace. The actual caller is the sole initial active admin. */
   public CompletableFuture<AuthoritySnapshot> create(Authorization auth, UUID requestId,
       GroupUser relationship, Group proposed) {
+    return create(auth, requestId, relationship, proposed, ByteString.EMPTY);
+  }
+
+  /** Gateway digest preserves exact authenticated request bytes in durable idempotency. */
+  public CompletableFuture<AuthoritySnapshot> create(Authorization auth, UUID requestId,
+      GroupUser relationship, Group proposed, ByteString gatewayRequestSha256) {
     try {
       var receipt = Receipt.capture(auth);
       Objects.requireNonNull(requestId);
@@ -181,7 +187,7 @@ public final class GroupAuthority {
       var roster = List.of(entry(receipt.aci, member.getUserId(), AuthorityRosterEntry.State.ACTIVE,
           Member.Role.ADMINISTRATOR, receipt.enrollment, receipt.epoch));
       var result = snapshot(id, 0, receipt.aci.toString(), nativeGroup, roster);
-      byte[] digest = digest("CREATE", id, proposed.toByteArray(), receipt.enrollment, receipt.epoch);
+      byte[] digest = bindGateway(digest("CREATE", id, proposed.toByteArray(), receipt.enrollment, receipt.epoch), gatewayRequestSha256);
       receipt.check();
       return transaction(receipt, null, c -> {
         lock(c, receipt, null, requestId, id);
@@ -211,6 +217,11 @@ public final class GroupAuthority {
   /** Expected revision applies to both clear authority and native state; no arbitrary replacement API. */
   public CompletableFuture<AuthoritySnapshot> change(Authorization auth, UUID requestId,
       GroupUser relationship, ByteString id, long expectedRevision, Change change) {
+    return change(auth, requestId, relationship, id, expectedRevision, change, ByteString.EMPTY);
+  }
+
+  public CompletableFuture<AuthoritySnapshot> change(Authorization auth, UUID requestId,
+      GroupUser relationship, ByteString id, long expectedRevision, Change change, ByteString gatewayRequestSha256) {
     try {
       var receipt = Receipt.capture(auth);
       Objects.requireNonNull(requestId); Objects.requireNonNull(change); Objects.requireNonNull(id);
@@ -224,7 +235,7 @@ public final class GroupAuthority {
             .setPresentation(acceptance.presentation).build());
       } else { accepted = null; }
       final Receipt invitee = change instanceof Invite invite ? Receipt.capture(invite.target) : null;
-      byte[] digest = digest("CHANGE", id, changeBytes(expectedRevision, change, invitee), receipt.enrollment, receipt.epoch);
+      byte[] digest = bindGateway(digest("CHANGE", id, changeBytes(expectedRevision, change, invitee), receipt.enrollment, receipt.epoch), gatewayRequestSha256);
       receipt.check();
       return transaction(receipt, invitee, c -> {
         lock(c, receipt, invitee, requestId, id);
@@ -510,6 +521,13 @@ public final class GroupAuthority {
         .setServerSignature(ByteString.copyFrom(serverSecretParams.sign(bytes).serialize())).build();
   }
   private static byte[] sha256(byte[] bytes) throws Exception { return MessageDigest.getInstance("SHA-256").digest(bytes); }
+  private static byte[] bindGateway(byte[] nativeDigest, ByteString gatewayDigest) throws Exception {
+    require(gatewayDigest != null && (gatewayDigest.isEmpty() || gatewayDigest.size() == 32), Failure.INVALID);
+    if (gatewayDigest.isEmpty()) return nativeDigest;
+    var bytes = new ByteArrayOutputStream();
+    try (var out = new DataOutputStream(bytes)) { out.writeUTF("BCONNECTED_GATEWAY_V1"); out.write(nativeDigest); gatewayDigest.writeTo(out); }
+    return sha256(bytes.toByteArray());
+  }
   private static byte[] digest(String domain, ByteString id, byte[] input, UUID enrollment, long epoch) throws Exception {
     var bytes = new ByteArrayOutputStream();
     try (var out = new DataOutputStream(bytes)) { out.writeUTF(domain); out.writeUTF(enrollment.toString()); out.writeLong(epoch); out.writeInt(id.size()); id.writeTo(out); out.writeInt(input.length); out.write(input); }
